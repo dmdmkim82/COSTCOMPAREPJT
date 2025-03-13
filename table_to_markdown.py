@@ -336,9 +336,132 @@ def convert_construction_wage_pdf_to_markdown(pdf_files):
         traceback.print_exc()
         return False
 
+def convert_cable_pdf_to_markdown(pdf_file="onlycable.pdf", output_file="cable_data.md"):
+    """
+    전기 케이블 PDF에서 표 데이터를 추출하여 마크다운 파일로 저장합니다.
+    """
+    print(f"Processing {pdf_file} for cable data...")
+    
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+        import pandas as pd
+        import numpy as np
+        import re
+        import os
+        from tabulate import tabulate
+        
+        # OCR 설정
+        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        
+        # PDF 열기
+        doc = fitz.open(pdf_file)
+        
+        # 데이터를 저장할 리스트
+        cable_data = []
+        
+        # 각 페이지 처리
+        for page_num in range(len(doc)):
+            print(f"Processing page {page_num+1}/{len(doc)}...")
+            page = doc.load_page(page_num)
+            
+            # 각 페이지를 이미지로 변환 (해상도 향상)
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # OCR 실행
+            text = pytesseract.image_to_string(img, lang='kor+eng')
+            
+            # 케이블 데이터 추출 (품명, 규격, 단위, 각 연도별 단가)
+            lines = text.split('\n')
+            
+            cable_pattern = re.compile(r'(F-CV|HIV|CVV|한국|케이블|전력|제어용|가교|연선|동선).*')
+            size_pattern = re.compile(r'(\d+(\.\d+)?)\s*[xX×]\s*(\d+(\.\d+)?)(sq)?\s*mm.*')
+            
+            for i, line in enumerate(lines):
+                if cable_pattern.search(line) or size_pattern.search(line):
+                    # 품명과 규격 찾기
+                    item_name = line.strip()
+                    size = ""
+                    
+                    # 규격 추출 시도
+                    size_match = size_pattern.search(line)
+                    if size_match:
+                        size = size_match.group(0).strip()
+                    
+                    # 단위 (기본값 'm' 설정)
+                    unit = 'm'
+                    
+                    # 가격 데이터 찾기 (다음 몇 줄 확인)
+                    for j in range(1, 4):
+                        if i + j < len(lines):
+                            price_line = lines[i + j]
+                            price_match = re.findall(r'(\d{1,3}(,\d{3})+|\d+)', price_line)
+                            
+                            if len(price_match) >= 2:  # 적어도 두 개의 숫자가 있으면 가격으로 간주
+                                # 연도와 가격 정보 추출
+                                years = ["2021", "2022", "2023", "2024"]
+                                prices = [p[0] for p in price_match]
+                                
+                                # 데이터가 충분하면 저장
+                                if len(prices) >= 2:
+                                    entry = {
+                                        "품명": item_name,
+                                        "규격": size,
+                                        "단위": unit
+                                    }
+                                    
+                                    # 가격 데이터 할당 (연도별)
+                                    for k, year in enumerate(years):
+                                        if k < len(prices):
+                                            entry[year] = prices[k].replace(",", "")
+                                        else:
+                                            entry[year] = ""
+                                    
+                                    cable_data.append(entry)
+                                    break
+        
+        doc.close()
+        
+        # 데이터프레임 생성
+        if cable_data:
+            df = pd.DataFrame(cable_data)
+            
+            # 중복된 행 제거
+            df = df.drop_duplicates()
+            
+            # 가격 데이터 숫자로 변환
+            for year in ["2021", "2022", "2023", "2024"]:
+                df[year] = pd.to_numeric(df[year], errors='coerce')
+            
+            # 마크다운 테이블 생성
+            markdown_table = tabulate(df, headers='keys', tablefmt='pipe', showindex=False)
+            
+            # 마크다운 파일로 저장
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write("# 전기 케이블 가격 데이터\n\n")
+                f.write(markdown_table)
+            
+            print(f"Cable data extracted and saved to {output_file}")
+            print(f"Found {len(df)} cable items")
+            print("Data preview:")
+            print(df.head())
+            
+            return True
+        else:
+            print("No cable data found in the PDF")
+            return False
+            
+    except Exception as e:
+        import traceback
+        print(f"Error processing cable PDF: {e}")
+        traceback.print_exc()
+        return False
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("사용법: python table_to_markdown.py <PDF 파일 경로 또는 'engineering' 또는 'construction'>")
+        print("사용법: python table_to_markdown.py <PDF 파일 경로 또는 'engineering' 또는 'construction' 또는 'cable'>")
         sys.exit(1)
     
     if sys.argv[1] == "engineering":
@@ -375,6 +498,12 @@ if __name__ == "__main__":
         success = convert_construction_wage_pdf_to_markdown(construction_files)
         if not success:
             sys.exit(1)
+    elif sys.argv[1] == "cable":
+        # 케이블 PDF 처리
+        pdf_file = "onlycable.pdf"
+        if len(sys.argv) > 2:
+            pdf_file = sys.argv[2]
+        convert_cable_pdf_to_markdown(pdf_file)
     else:
         # 단일 PDF 파일 처리
         pdf_path = sys.argv[1]

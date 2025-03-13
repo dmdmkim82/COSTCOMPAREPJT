@@ -52,62 +52,86 @@ st.markdown(f"""
 @st.cache_data
 def load_and_process_data():
     try:
-        with open('onlycable.json', 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # text 필드에서 필요한 정보만 추출
-        text = data.get('text', '')
-        
-        # 데이터 추출을 위한 패턴
-        year_pattern = r'(\d{4})년'
-        size_pattern = r'(\d+(?:\.\d+)?SQ)'
-        price_pattern = r'(\d{1,3}(?:,\d{3})*)'
-        
-        # 데이터 저장을 위한 리스트
-        cable_data = []
-        
-        # 텍스트를 줄 단위로 분리
-        lines = text.split('\n')
-        current_year = None
-        current_size = None
-        
-        for line in lines:
-            # 연도 확인
-            year_match = re.search(year_pattern, line)
-            if year_match:
-                current_year = int(year_match.group(1))
-                continue
+        # 전기 케이블 데이터 로드 (마크다운 파일에서)
+        try:
+            # 마크다운 파일에서 케이블 데이터 읽기
+            with open('cable_data.md', 'r', encoding='utf-8') as f:
+                markdown_content = f.read()
+            
+            # 마크다운 테이블 파싱
+            import re
+            rows = re.findall(r'\|(.*?)\|', markdown_content)
+            
+            # 헤더와 구분선 건너뛰기
+            rows = [row for row in rows if '----' not in row]
+            if len(rows) > 1:  # 헤더와 데이터 행이 있는 경우
+                # 헤더 파싱
+                headers = [h.strip() for h in rows[0].split('|')]
                 
-            # 사이즈 확인
-            size_match = re.search(size_pattern, line)
-            if size_match:
-                current_size = size_match.group(1)
-                continue
+                # 데이터 행 파싱
+                data = []
+                for row in rows[1:]:
+                    values = [val.strip() for val in row.split('|')]
+                    entry = {headers[i]: values[i] for i in range(len(headers)) if i < len(values)}
+                    data.append(entry)
                 
-            # 가격 확인
-            price_match = re.search(price_pattern, line)
-            if price_match and current_year and current_size:
-                try:
-                    price = int(price_match.group(1).replace(',', ''))
-                    if price > 0:  # 유효한 가격만 저장
-                        cable_data.append({
-                            'year': current_year,
-                            'size': current_size,
-                            'price': price
-                        })
-                except ValueError:
-                    continue
+                cable_df = pd.DataFrame(data)
+                
+                # 숫자형 변환
+                for year in ['2021', '2022', '2023', '2024']:
+                    if year in cable_df.columns:
+                        cable_df[year] = pd.to_numeric(cable_df[year])
+                
+                print("케이블 데이터 로드 완료 (마크다운 파일)")
+            else:
+                # 마크다운 파싱 실패 시 JSON 파일 대체
+                raise Exception("마크다운 파싱 실패")
+        except Exception as e:
+            print(f"마크다운 로드 오류, JSON으로 대체: {e}")
+            # 기존 JSON 파일 로드 (대체 방법)
+            with open('onlycable.json', 'r', encoding='utf-8') as f:
+                cable_data = json.load(f)
+            cable_df = pd.DataFrame(cable_data)
         
-        # DataFrame 생성 및 정리
-        df = pd.DataFrame(cable_data)
-        if not df.empty:
-            df = df.drop_duplicates()
-            df = df.sort_values(['year', 'size'])
+        # 토목 자재 데이터 로드
+        try:
+            with open('concre_table_ocr.md', 'r', encoding='utf-8') as f:
+                concre_df = pd.read_csv(f, delimiter='|')
+                concre_df = concre_df.iloc[:, 1:-1]  # 첫 번째와 마지막 열 제거 (마크다운 형식으로 인한 빈 열)
+                concre_df.columns = concre_df.columns.str.strip()  # 열 이름의 공백 제거
+        except Exception as e:
+            print(f"토목 데이터 로드 오류: {e}")
+            concre_df = pd.DataFrame()
         
-        return df
+        # 엔지니어링 노임 데이터 로드
+        try:
+            with open('engineering_salary_ocr.md', 'r', encoding='utf-8') as f:
+                eng_df = pd.read_csv(f, delimiter='|')
+                eng_df = eng_df.iloc[:, 1:-1]  # 첫 번째와 마지막 열 제거 (마크다운 형식으로 인한 빈 열)
+                eng_df.columns = eng_df.columns.str.strip()  # 열 이름의 공백 제거
+        except Exception as e:
+            print(f"엔지니어링 노임 데이터 로드 오류: {e}")
+            eng_df = pd.DataFrame()
+            
+        # 건설업 임금실태 데이터 로드
+        try:
+            with open('construction_wage_ocr.md', 'r', encoding='utf-8') as f:
+                construction_df = pd.read_csv(f, delimiter='|')
+                construction_df = construction_df.iloc[:, 1:-1]  # 첫 번째와 마지막 열 제거 (마크다운 형식으로 인한 빈 열)
+                construction_df.columns = construction_df.columns.str.strip()  # 열 이름의 공백 제거
+        except Exception as e:
+            print(f"건설업 임금실태 데이터 로드 오류: {e}")
+            construction_df = pd.DataFrame()
+        
+        return {
+            'cable': cable_df,
+            'concre': concre_df,
+            'engineering': eng_df,
+            'construction': construction_df
+        }
     except Exception as e:
-        st.error(f"데이터 로드 중 오류 발생: {str(e)}")
-        return pd.DataFrame()  # 빈 DataFrame 반환
+        print(f"데이터 로드 중 오류 발생: {e}")
+        return None
 
 @st.cache_data
 def load_concrete_data():
@@ -248,6 +272,103 @@ def calculate_concrete_price_change(df, spec):
         return price_2020, price_2025, total_change, avg_annual_change
     return None, None, None, None
 
+@st.cache_data
+def load_cable_data():
+    try:
+        # Markdown 파일에서 케이블 데이터 읽기
+        print("cable_data.md 파일 읽기 시도...")
+        
+        with open('cable_data.md', 'r', encoding='utf-8') as f:
+            markdown_text = f.read()
+            # BOM 제거
+            if markdown_text.startswith('\ufeff'):
+                markdown_text = markdown_text[1:]
+            print(f"파일 로드 성공: {len(markdown_text)} 바이트")
+            
+        # 마크다운 테이블을 파싱하여 데이터프레임으로 변환
+        lines = markdown_text.strip().split('\n')
+        print(f"파싱된 라인 수: {len(lines)}")
+        
+        # 테이블 부분만 추출 (처음 몇 줄은 제목일 수 있음)
+        table_start = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith('|') and '|' in line[1:]:
+                table_start = i
+                break
+        
+        if table_start == -1 or table_start + 2 >= len(lines):
+            print("마크다운 테이블을 찾을 수 없습니다.")
+            return pd.DataFrame()
+        
+        # 헤더 행 추출
+        header_line = lines[table_start]
+        headers = [h.strip() for h in header_line.split('|')[1:-1]]
+        print(f"추출된 헤더: {headers}")
+        
+        # 구분선 건너뛰기
+        # 데이터 행 추출 (구분선 다음부터)
+        data_lines = lines[table_start + 2:]
+        
+        cable_data = []
+        for line in data_lines:
+            if not line.strip().startswith('|'):
+                continue
+                
+            values = [val.strip() for val in line.split('|')[1:-1]]
+            if len(values) != len(headers):
+                print(f"열 개수 불일치: {len(values)} vs {len(headers)}, 값: {values}")
+                continue
+                
+            # 연도별 데이터 항목 생성
+            brand = values[0]  # 품명
+            size = values[1]   # 규격
+            unit = values[2]   # 단위
+            
+            for i, year in enumerate(['2021', '2022', '2023', '2024']):
+                year_idx = i + 3  # 품명, 규격, 단위 다음이 2021년부터
+                if year_idx < len(values) and values[year_idx] and values[year_idx].strip():
+                    try:
+                        # 가격에 쉼표가 있을 경우 제거
+                        price_str = values[year_idx].replace(',', '')
+                        price = int(price_str)
+                        cable_data.append({
+                            'year': int(year),
+                            'brand': brand,
+                            'size': size,
+                            'unit': unit,
+                            'price': price
+                        })
+                    except ValueError as e:
+                        print(f"가격 변환 오류: {values[year_idx]}, 오류: {e}")
+        
+        print(f"추출된 데이터 항목 수: {len(cable_data)}")
+        
+        if not cable_data:
+            print("파싱된 데이터가 없습니다. 원본 테이블 일부 출력:")
+            for i in range(min(5, len(lines))):
+                print(lines[i])
+            return pd.DataFrame()
+        
+        # 데이터프레임 생성
+        df = pd.DataFrame(cable_data)
+        print(f"생성된 데이터프레임 크기: {df.shape}")
+        print(df.head())
+        
+        return df
+    
+    except FileNotFoundError:
+        error_msg = "cable_data.md 파일을 찾을 수 없습니다."
+        print(error_msg)
+        st.error(error_msg)
+        return pd.DataFrame()
+    except Exception as e:
+        import traceback
+        error_msg = f"케이블 데이터 로드 중 오류 발생: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        st.error(error_msg)
+        return pd.DataFrame()
+
 # 메인 타이틀
 col1, col2 = st.columns([1, 3])
 with col1:
@@ -258,15 +379,15 @@ with col2:
 # 사이드바에 분야 선택 추가
 selected_field = st.sidebar.selectbox(
     "분야 선택",
-    ["전기", "토목", "엔지니어링노임", "건설업 임금실태"]
+    ["엔지니어링노임", "건설업 임금실태", "토목", "전기"]
 )
 
 if selected_field == "전기":
     st.header("전기자재 - 케이블 가격비교")
     
     try:
-        # 데이터 로드
-        df = load_and_process_data()
+        # 케이블 데이터 로드
+        df = load_cable_data()
         
         if not df.empty:
             # 사이드바에 필터 추가
@@ -280,8 +401,15 @@ if selected_field == "전기":
                 default=years
             )
             
+            # 케이블 유형 선택
+            brands = sorted(df['brand'].unique())
+            selected_brand = st.sidebar.selectbox(
+                "케이블 유형 선택",
+                brands
+            )
+            
             # 케이블 사이즈 선택
-            sizes = sorted(df['size'].unique())
+            sizes = sorted(df[df['brand'] == selected_brand]['size'].unique())
             selected_size = st.sidebar.selectbox(
                 "케이블 사이즈 선택",
                 sizes
@@ -290,117 +418,112 @@ if selected_field == "전기":
             # 데이터 필터링
             filtered_df = df[
                 (df['year'].isin(selected_years)) &
+                (df['brand'] == selected_brand) &
                 (df['size'] == selected_size)
             ]
             
-            if len(selected_years) >= 2 and len(filtered_df) >= 2:
-                # 선택된 연도 범위 계산
-                min_year = min(selected_years)
-                max_year = max(selected_years)
+            # 메인 영역
+            st.header(f"{selected_brand} {selected_size} 가격 변동")
+            
+            # 데이터 시각화
+            if not filtered_df.empty:
+                # 가격 변동 그래프
+                fig = px.line(
+                    filtered_df, 
+                    x='year', 
+                    y='price',
+                    markers=True,
+                    title=f"{selected_brand} {selected_size} 연도별 가격 변동"
+                )
+                fig.update_layout(
+                    xaxis_title="연도",
+                    yaxis_title="가격(원)",
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
                 
-                # 해당 연도의 가격 확인
-                min_year_data = filtered_df[filtered_df['year'] == min_year]
-                max_year_data = filtered_df[filtered_df['year'] == max_year]
+                # 가격 데이터 테이블
+                st.subheader("가격 데이터")
+                price_data = filtered_df[['year', 'price']].sort_values('year')
+                st.dataframe(price_data, use_container_width=True)
                 
-                if not min_year_data.empty and not max_year_data.empty:
-                    min_year_price = min_year_data.iloc[0]['price']
-                    max_year_price = max_year_data.iloc[0]['price']
+                # 가격 변동률 계산
+                if len(price_data) >= 2:
+                    min_year = min(price_data['year'])
+                    max_year = max(price_data['year'])
                     
-                    # 총 변동률
-                    total_change = ((max_year_price - min_year_price) / min_year_price) * 100
+                    min_price = price_data[price_data['year'] == min_year]['price'].values[0]
+                    max_price = price_data[price_data['year'] == max_year]['price'].values[0]
                     
-                    # 연평균 변동률
+                    total_change = max_price - min_price
+                    total_change_percent = (total_change / min_price) * 100
                     years_diff = max_year - min_year
-                    if years_diff > 0:
-                        avg_annual_change = ((max_year_price / min_year_price) ** (1/years_diff) - 1) * 100
-                    else:
-                        avg_annual_change = 0
+                    annual_change_percent = total_change_percent / years_diff if years_diff > 0 else 0
                     
-                    # 2개의 컬럼 생성
                     col1, col2 = st.columns(2)
-                    
                     with col1:
-                        # 가격 비교 그래프
-                        st.subheader(f"가격 비교 ({min_year}년 vs {max_year}년)")
-                        
-                        comp_df = pd.DataFrame({
-                            '연도': [f'{min_year}년', f'{max_year}년'],
-                            '가격': [min_year_price, max_year_price]
-                        })
-                        
-                        fig = px.bar(comp_df, x='연도', y='가격',
-                                   title=f'케이블 {selected_size} 가격 비교',
-                                   color='연도',
-                                   labels={'연도': '', '가격': '가격 (원)'},
-                                   text_auto=True)
-                        st.plotly_chart(fig)
-                        
-                        # 모든 연도의 가격 추이 그래프
-                        st.subheader(f"{selected_size} 가격 추이")
-                        trend_fig = px.line(filtered_df.sort_values('year'), x='year', y='price',
-                                        title=f'케이블 {selected_size} 연도별 가격 추이',
-                                        labels={'year': '연도', 'price': '가격 (원)'},
-                                        markers=True)
-                        st.plotly_chart(trend_fig)
-                    
+                        st.metric("총 변동액", f"{total_change:,}원", f"{total_change_percent:.1f}%")
                     with col2:
-                        # 가격 변동 분석
-                        st.subheader("가격 변동 분석")
-                        
-                        st.metric(
-                            label=f"{min_year}년 가격",
-                            value=f"{min_year_price:,} 원"
-                        )
-                        
-                        st.metric(
-                            label=f"{max_year}년 가격",
-                            value=f"{max_year_price:,} 원",
-                            delta=f"{total_change:.2f}%"
-                        )
-                        
-                        st.write(f"**총 변동률 ({min_year}-{max_year}):** {total_change:.2f}%")
-                        if years_diff > 0:
-                            st.write(f"**연평균 변동률:** {avg_annual_change:.2f}%")
-                        
-                        # 연도별 가격 테이블
-                        st.subheader("상세 데이터")
-                        st.dataframe(filtered_df[['year', 'price']].set_index('year').sort_index())
+                        st.metric("연평균 변동률", f"{annual_change_percent:.1f}%")
+                
+                # 모든 사이즈 비교
+                st.header("케이블 사이즈별 가격 변동률 비교")
+                
+                if len(selected_years) >= 2:
+                    min_year = min(selected_years)
+                    max_year = max(selected_years)
                     
-                    # 다양한 사이즈의 가격 변동률 비교 (선택된 연도 범위에 대해)
-                    st.subheader("사이즈별 가격 변동률 비교")
-                    
-                    # 모든 사이즈의 변동률 계산
                     change_data = []
                     for size in sizes:
                         size_data = df[
+                            (df['brand'] == selected_brand) &
                             (df['size'] == size) & 
                             (df['year'].isin([min_year, max_year]))
                         ]
                         
-                        if len(size_data) == 2:  # 최소, 최대 연도 데이터가 모두, 있는 경우
-                            min_price = size_data[size_data['year'] == min_year]['price'].values[0]
-                            max_price = size_data[size_data['year'] == max_year]['price'].values[0]
-                            size_change = ((max_price - min_price) / min_price) * 100
+                        if len(size_data) == 2:
+                            min_year_price = size_data[size_data['year'] == min_year]['price'].values[0]
+                            max_year_price = size_data[size_data['year'] == max_year]['price'].values[0]
+                            
+                            change = max_year_price - min_year_price
+                            change_percent = (change / min_year_price) * 100
+                            
                             change_data.append({
-                                '케이블 사이즈': size,
-                                '변동률': size_change
+                                'size': size,
+                                'min_price': min_year_price,
+                                'max_price': max_year_price,
+                                'change': change,
+                                'change_percent': change_percent
                             })
                     
                     change_df = pd.DataFrame(change_data)
                     if not change_df.empty:
-                        fig_all = px.bar(change_df, x='케이블 사이즈', y='변동률',
-                                      title=f'사이즈별 가격 변동률 ({min_year}-{max_year})',
-                                      labels={'케이블 사이즈': '', '변동률': '변동률 (%)'},
-                                      color='변동률',
-                                      text_auto='.2f')
-                        st.plotly_chart(fig_all)
-                else:
-                    st.warning(f"선택한 사이즈 '{selected_size}'에 대한 {min_year}년 또는 {max_year}년 데이터가 없습니다.")
+                        # 변동률 그래프
+                        fig = px.bar(
+                            change_df, 
+                            x='size', 
+                            y='change_percent',
+                            title=f"{min_year}년 대비 {max_year}년 가격 변동률(%)"
+                        )
+                        fig.update_layout(
+                            xaxis_title="케이블 사이즈",
+                            yaxis_title="변동률(%)",
+                            height=400
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # 변동률 데이터 테이블
+                        st.subheader("사이즈별 가격 변동 데이터")
+                        change_df['min_price'] = change_df['min_price'].apply(lambda x: f"{x:,}원")
+                        change_df['max_price'] = change_df['max_price'].apply(lambda x: f"{x:,}원")
+                        change_df['change'] = change_df['change'].apply(lambda x: f"{x:,}원")
+                        change_df['change_percent'] = change_df['change_percent'].apply(lambda x: f"{x:.1f}%")
+                        
+                        st.dataframe(change_df[['size', 'min_price', 'max_price', 'change', 'change_percent']], use_container_width=True)
             else:
-                st.warning("분석을 위해 최소 2개 이상의 연도를 선택해주세요.")
+                st.warning("선택한 조건에 맞는 데이터가 없습니다.")
         else:
-            st.error("데이터를 불러올 수 없습니다.")
-    
+            st.error("케이블 데이터를 로드할 수 없습니다.")
     except Exception as e:
         st.error(f"오류가 발생했습니다: {str(e)}")
         st.exception(e)
